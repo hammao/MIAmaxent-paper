@@ -1,0 +1,908 @@
+---
+title: 'The MIAmaxent R package: variable transformation and model selection for species
+  distribution models'
+author:
+  - Julien Vollering:
+      email: julienvollering@gmail.com
+      institute: [IMN, NHM]
+      correspondence: true
+  - name: Rune Halvorsen
+    institute: NHM
+  - name: Sabrina Mazzoni
+    institute: NHM
+institute:
+  - IMN: Department of Environmental Sciences, Western Norway University of Applied Sciences, Sogndal, Norway
+  - NHM: Department of Research and Collections, Natural History Museum, University of Oslo, Oslo, Norway
+bibliography: miamaxent-ms.bib
+output: 
+  word_document:
+    pandoc_args:
+      - '--lua-filter=lua-filters/scholarly-metadata.lua'
+      - '--lua-filter=lua-filters/author-info-blocks.lua'
+editor_options:
+  chunk_output_type: console
+link-citations: yes
+csl: ecology.csl
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, tidy=TRUE, tidy.opts = list(width.cutoff=60))
+```
+
+# ORCIDs
+
+Julien Vollering: <https://orcid.org/0000-0002-7409-2898>
+
+Rune Halvorsen: <https://orcid.org/0000-0002-6859-7726>
+
+Sabrina Mazzoni: <https://orcid.org/0000-0003-0049-199X>
+
+# Running head
+
+MIAmaxent R package
+
+# Abstract
+
+The widely used "Maxent" software for modeling species distributions from presence-only data [@phillips2006] tends to produce models with high predictive performance but low ecological interpretability, and implications of Maxent's statistical approach to variable transformation, model fitting, and model selection remain under-appreciated.
+In particular, Maxent's approach to model selection through lasso regularization has been shown to give less parsimonious distribution models --- i.e. models which are more complex but not necessarily predictively better --- than subset selection.
+In this paper we introduce the MIAmaxent R package, which provides a statistical approach to modeling species distributions similar to Maxent's, but with subset selection instead of lasso regularization.
+The simpler models typically produced by subset selection are ecologically more interpretable, and making distribution models more grounded in ecological theory is a fundamental motivation for using MIAmaxent.
+To that end, the package executes variable transformation based on expected occurrence-environment relationships, and contains tools for exploring data and interrogating models in light of knowledge of the modeled system.
+Additionally, MIAmaxent implements two different kinds of model fitting: maximum entropy fitting for presence-only data, and logistic regression (GLM) for presence-absence data.
+Unlike Maxent, MIAmaxent decouples variable transformation, model fitting, and model selection, which facilitates methodological comparisons and gives the modeler greater flexibility when choosing a statistical approach to a given distribution modeling problem.
+
+# Keywords
+
+lasso regularization; Maxent; maximum entropy; species distribution modeling; subset selection; variable transformation
+
+# Background
+
+Correlative distribution models --- which use spatial association to find statistical relationships between the occurrence of a modeled target and its environment --- are prevalent in the ecological literature [@guisan2013].
+Particularly common are modeling methods that contrast presence locations against the study area at large (so-called "background" locations), because absence data are comparatively scarce [@pearce2006].
+One such method, maximum entropy distribution modeling, was first introduced in standalone Java software called "Maxent", released in 2006 [@phillips2006].
+The software was made freely available with a graphical user interface that is easy to use for modelers of all levels of experience. 
+In addition, the models it produced showed high predictive performance in Elith et al.'s [-@elith2006] influential paper comparing various distribution modeling methods. 
+As a result, Maxent quickly became a very popular tool for distribution modeling; the paper that introduced it has more than 5000 citations in the Web of Science Core Collection, and more than 60% of distribution modelers report using it [@ahmed2015]. 
+Recently, the Java software (currently version 3.4.1) was also adapted into an R package called "maxnet" [@phillips2017, currently version 0.1.2]. 
+For the remainder of this paper we refer primarily to the Maxent Java software, but our statements are equally applicable to the maxnet R package. 
+
+The core functionality of the Maxent software is a statistical approach that comprises three linked main elements: (1) variable transformation ("feature creation" in Maxent's terminology), (2) maximum entropy fitting, and (3) lasso regularization. 
+Variable transformation expands explanatory variables (EVs) into a larger set of derived variables (DVs), the maximum entropy fitting algorithm finds parameter estimates, and lasso regularization reduces model overfitting.
+Maxent implements these three elements together owing to its origins in the field of machine learning [@phillips2004; @phillips2006; @elith2011; @merow2013].
+However, there is no reason that variable transformation, maximum entropy fitting, and lasso regularization must be used in tandem; for example, a maximum entropy distribution model might equally be fit without variable transformation or by a different model selection technique. 
+Nor is it clear that this combination of elements represents the optimal approach to presence-background distribution modeling.
+In fact, the literature reveals that many models produced by Maxent are difficult to interpret and poorly grounded in ecological theory, as evidenced by highly complex response curves, large numbers of parameters, and little critical examination of modeled relationships [@halvorsen2013; @yackulic2013].
+For studies aiming to explain occurrence-environment relationships, or to project them to a different spatial or temporal context, these norms are troubling [@halvorsen2012, especially Fig. 15 therein]. 
+
+The purpose of this paper is to present the MIAmaxent R package as an alternative to the Maxent software, and to summarize the motivation for MIAmaxent and its underlying approach [@halvorsen2013; @mazzoni2015].
+First we assess individually the utility of variable transformation, maximum entropy fitting, and lasso regularization for distribution modeling.
+Especially, we ask how compatible each of these elements is with ecological theory concerning species responses to environmental gradients, using insights from the long tradition of gradient analysis in ecology [@austin2002; @austin2007; @halvorsen2012].
+Then we show how modifications to Maxent's statistical approach --- implemented in MIAmaxent --- lead to more ecologically-grounded and interpretable distribution models.
+By "ecologically-grounded" we mean: in concordance with expectations about occurrence-environment relationships derived from lines of inquiry other than correlative distribution modeling. 
+By "interpretable" we mean: simple enough that the relationship between prediction and predictors can be explained in an ecologically meaningful way.
+
+### Variable transformation
+
+Variable transformation in Maxent means that explanatory data enter into the model as DVs --- functions of the original EVs supplied by the modeler [@phillips2006].
+It can be thought of as changing the functional form of the model specification, akin to adding polynomial terms to a linear regression.
+Recent versions of the software support five transformation types for continuous EVs: linear, quadratic, threshold, forward hinge, and reverse hinge [@phillips2008; @phillips2017]. 
+In addition, categorical EVs are transformed into binary (dummy) DVs, and interaction terms are possible in the form of product transformations between pairs of EVs [@phillips2006].
+The effect of variable transformation is that the relationship between occurrence of the modeled target and an EV can be captured more flexibly than if only the original EVs enter into the model [@phillips2006; @austin2007; @halvorsen2013].
+For example, if an occurrence rate is constant for one part of an EV range and monotonically increasing or decreasing for another part, then a hinge transformation of that EV allows Maxent to fit the response more closely than the original EV.
+Thus, variable transformation relates critically to the modeler's expectations about which model response shapes are ecologically realistic [@phillips2006; @halvorsen2013; @merow2014].
+
+The gradient analysis literature shows that, across a sufficiently large interval, a species' response to any environmental determinant is generally unimodal, but truncation of the interval and the way the variable is scaled may affect the shape of the observed response [@rydgren2003; @austin2007; @halvorsen2012]. 
+Thus, a particular variable transformation type accords with expectations based on gradient analysis if it enables a unimodal model response, or some truncated portion thereof, to the original EV. 
+All of the transformation types in Maxent conform to this condition.
+Even a threshold transformation, which makes a continuous variable binary, can be regarded as approximating a strongly skewed and truncated unimodal response [@halvorsen2012].
+However, the list of transformation types in Maxent is not exhaustive, and other ecologically-motivated transformations could also be considered [@phillips2006; @halvorsen2013].
+Increasingly complex transformation types allow a closer fit to the data, but are less interpretable with respect to the original EV, and result in a less generalizable model. 
+
+Although the transformation types in Maxent are individually consistent with ecological expectations, combinations of the DVs they produce frequently result in model responses that are not.
+For example, the combined effects of multiple DVs may create a local minimum in the model response to a continuous EV [e.g. @elith2011, Fig. 5], which is inconsistent with the expectation of unimodality.
+More generally, a model containing multiple, simple transformations of a single EV can show a highly complex response to that EV.
+Therefore, a model will be more ecologically-grounded and interpretable if the set of DVs it includes is tailored to the modeled system, based on *a priori* knowledge of the modeled target in the study area, or exploratory analyses of the data.
+Specifically, DVs that are responsible for unrealistic or unexpected response shapes, or that capture idiosyncrasies in the data rather than patterns of interest [@merow2013], should be discarded.
+However, Maxent applies the same transformation types to all continuous EVs, and does not provide the possibility to customize the resulting set of DVs.
+Moreover, Maxent users frequently neglect to examine modeled relationships critically [@yackulic2013], so they are ill-equipped to iteratively refine the set of DVs. 
+In short: Maxent's variable transformation procedure does not offer the level of user control that is necessary to make maximally interpretable and ecologically-grounded models.
+
+### Maximum entropy fitting
+ 
+The model fitting algorithm in Maxent is based on the principle of maximum entropy [@jaynes1957; @jaynes1957a], which has given the software its name. 
+This algorithm finds the probability distribution that is minimally divergent from the distributions of predictors (equivalently: maximally uniform in space), subject to constraints given by the presence locations [@elith2011].
+The constraint placed on the distribution in Maxent is that the expected value of each predictor must match its empirical mean among presence locations [@phillips2006].
+Note that we use the term "predictor" to refer generically to any variable component of a model, regardless of whether it is transformed (DV) or not (EV).
+Under this constraint, the distribution which maximizes entropy follows a specific exponential distribution called a Gibbs distribution [@dellapietra1997].
+In recent years it has been shown that these maximum entropy models belong to a broader family of solutions to parametric density estimation problems, that also includes inhomogeneous Poisson process models (IPP) and logistic regression models [@warton2010; @aarts2012; @fithian2013; @renner2013].
+It particular, Fithian and Hastie [-@fithian2013] showed that logistic regression recovers the same parameter estimates as the maximum entropy algorithm when background locations are weighted strongly compared to presence locations (so-called "infinitely weighted logistic regression"; IWLR). 
+
+Maximum entropy fitting gives the estimate of occurrence density that is maximally noncommittal, or minimally presumptive, while conforming to the information in the data [@jaynes1957].
+A minimally presumptive model fit may be especially appropriate for the opportunistically collected presence-only data commonly used for distribution modeling, since frequent artifacts in these data --- e.g., resulting from sampling bias [@stoa2018] --- may easily be inherited by overfitted models.
+For example, the classification methods (boosted regression trees and random forests) tested by Elith et al. [-@elith2009] were more prone than Maxent to capture idiosyncratic patterns specific to the sample, despite applying variance reduction measures similar to Maxent's lasso regularization [@elith2009, Supplemental Information].
+Put another way, a maximally noncommittal model is likely to generalize well beyond its training data. 
+This fact may not be captured in measures of predictive performance, which are typically estimated by use of data that are not fully independent of the training data [@halvorsen2012] due to spatial and temporal autocorrelation in geographic distributions [@araujo2005].
+Presence-absence evaluation data that are collected independently of the training data may nonetheless give the best indication of a model's generalizability [e.g. @edvardsen2011; @searcy2014; @halvorsen2016; @pinto2016; @west2016].
+
+While some fitting algorithms assume a distinct form of the occurrence-environment relationship, such as the rectilinear environmental space dictated by the classic BIOCLIM algorithm [@guisan2000], maximum entropy fitting is exclusively responsive to the data. 
+That gives maximum entropy fitting a straightforward ecological interpretation: it produces responses to predictors which deviate minimally from uniformity (i.e. no response). 
+For this reason, a model fitted by maximum entropy will be interpretable and ecologically-grounded to the same degree that the predictors in the model are, which emphasizes the importance of variable transformation.
+Maximum entropy fitting in itself is fully compatible with ecological theory concerning species responses to environmental gradients.
+
+### Lasso regularization
+
+The Maxent software uses a technique termed "lasso" (Least Absolute Shrinkage and Selection Operator) regularization to prevent model overfitting and improve model generalizability [@tibshirani1996; @phillips2006].
+Lasso regularization is one way to optimize the bias-variance tradeoff inherent in model selection [@hastie2009]; a more familiar model selection technique for many ecologists is subset selection [@zuur2007]. 
+Like subset selection, lasso regularization balances a model's goodness-of-fit against its complexity, by penalizing model complexity.
+However, unlike subset selection, the penalty is on the sum of absolute values of predictor coefficients, rather than on the number of predictors [@reineking2006].
+As a result, lasso regularization reduces the magnitude of (i.e. shrinks) coefficients, potentially to zero, instead of selecting a subset of predictors.
+Subset selection "is a discrete process --- variables are either retained or discarded," while "shrinkage methods [like lasso regularization] are more continuous" [@hastie2009].
+Lasso regularization stems from machine learning, a tradition where predictive power is valued above all else [@breiman2001], whereas subset selection stems from the classical tradition of hypothesis testing, and aims to distinguish important predictors from insignificant ones [@hastie2009].
+
+An important difference between lasso regularization and subset selection is that subset selection provides unbiased parameter estimates [@merow2013; @halvorsen2015; Appendix A1].
+In contrast, lasso regularization allows the expected value of a given predictor to deviate from its mean presence value to achieve parsimony; that is, it relaxes the constraint on the maximum entropy distribution that expected values match their unbiased estimates [@reineking2006; @halvorsen2013]. 
+This behavior is by design [@efron2001], and may be excused on the grounds that the constraint should not be enforced too closely, to prevent overfitting [e.g. @elith2011].
+However, subset selection also prevents overfitting, without biased estimates. 
+Therefore, subset selection accords better with the principle of maximum entropy, which seeks the "least biased estimate possible on the given information" [@jaynes1957], if the given information comprises the occurrence data and the predictors in the model.
+We emphasize that both lasso regularization and subset selection methods are subject to the bias-variance tradeoff, so --- regardless of which method is employed --- model complexity needs to be optimized from case to case according to the purposes of the study and characteristics of the data [@reineking2006; @halvorsen2013; @merow2014].
+
+Regression simulations have shown that subset selection performs better than lasso regularization when two conditions are fulfilled: 1) relatively few candidate predictors have an effect on the modeled target and 2) their signal in the data is sufficiently strong [@tibshirani1996; @reineking2006].
+Specifically, Reineking and Schröder [-@reineking2006] showed that subset selection of logistic regression models results in better discrimination ability and better identification of true predictors when less than eight of 16 candidate predictors drive the response and more than 20 presences or absences per candidate predictor are observed.
+Their study used presence-absence data, so its conclusions are not directly generalizable to presence-background models, but it indicates which modeling circumstances are favorable for subset selection.
+Regarding species distributions, the gradient analysis literature suggests that the vast majority of environmentally determined variation in species occurrences is governed by a very limited number of composite, complex gradients [up to 3; @halvorsen2012]. 
+Together, these findings suggest that some distribution modeling applications may achieve better discrimination ability and better identification of true predictors via subset selection than via lasso regularization. 
+We note that Gastón and García-Viñas [-@gaston2011] found presence-background models selected by regularization to discriminate better than those selected by subset selection, but differences in variable transformation and interaction terms confound the comparison in that study.
+
+One way to articulate the difference between lasso regularization and subset selection is that under lasso regularization, selection of predictors is secondary to parameter estimation, while under subset selection, parameter estimation is secondary to selection of predictors. 
+Since predictors in distribution models usually represent ecologically meaningful quantities --- especially when the purpose is to gain insight into the modeled target's response to its environment --- subset selection will generally result in more interpretable models.
+Conceptually, if there exist two models with equal goodness-of-fit, where the first contains one predictor and the second contains two other predictors, and the sum of the absolute values of the coefficients in the two models are equal, then lasso regularization makes no distinction between the two models while subset selection prefers the model with only one predictor.
+For this reason, lasso regularization is more likely to result in models that include ecologically meaningless predictors [@halvorsen2013].
+Indeed, comparisons between lasso regularization and subset selection show that subset selection generally results in models with fewer predictors [@reineking2006; @halvorsen2013; @halvorsen2016, @mazzoni2016 (chapter 6); Appendix A2].
+Halvorsen et al. [-@halvorsen2016] found that, across a range of model complexity penalties, distribution models selected by either lasso regularization or subset selection showed approximately equal predictive performance on independent presence-absence evaluation data, but the models selected by subset selection included significantly fewer predictors [see also @mazzoni2016, paper 6].
+In effect, the models selected by subset selection were more parsimonious.
+Lower model complexity is generally favorable for large spatial extents and coarse spatial resolutions, for small sample sizes, for strong sampling bias, and for applications that involve spatial or temporal extrapolation [@randin2006; @elith2010; @merow2014; @moreno-amat2015; @bell2016].
+For example, when projecting to a new area, changes in the covariance structure of predictors [@dormann2013] pose less of a risk for models containing fewer EVs.
+Simpler distribution models are also more suitable for hypothesis testing than for hypothesis generation, and are clearly preferable when ecological interpretation is of interest in addition to spatial prediction [@halvorsen2013; @merow2014; e.g. @bendiksby2014]. 
+In summary, lasso regularization's focus on prediction error promotes complexity and sacrifices ecological interpretability of distribution models.
+
+## Motivation for MIAmaxent
+
+There is no consensus in the literature about the relative merits of Maxent's three core modeling elements --- variable transformation, maximum entropy fitting, and lasso regularization --- with regards to predictive performance or otherwise [@phillips2008; @fletcher2018]. 
+However, adjustments can be made to Maxent's variable transformation procedure to bring models more in line with expected ecological responses, and there is evidence that lasso regularization is not the optimal model selection technique for many distribution modeling applications [@reineking2006; @halvorsen2013; @halvorsen2015; @halvorsen2016]. 
+Applications focused on explaining the relationship of the modeled target to its environment, rather than predicting the modeled target's distribution in geographic space [@halvorsen2012; @araujo2019], are better served by subset selection than lasso regularization, because the former produces more interpretable models.
+Applications focused on projecting model predictions outside of the spatial or temporal context of the data may also benefit from subset selection, because it tends to result in lower model complexity, which often improves model generalizability [@elith2010; @merow2014; @moreno-amat2015; @bell2016].
+
+While it is possible to use the Maxent software without lasso regularization, practically none do so [@halvorsen2013; @mazzoni2015; @morales2017].
+This is unsurprising, because in the absence of an alternative, turning off lasso regularization will result in overfitted, highly complex models.
+Therefore, there is a need for a tool which replaces lasso regularization with subset selection, while retaining the two other core elements of Maxent. 
+Software availability strongly affects modeling decisions [@ahmed2015], so a tool for subset selection will increase the likelihood that modelers investigate alternatives to lasso regularization.
+Furthermore, the coupling of variable transformation, maximum entropy fitting, and lasso regularization in the Maxent software hinders proper investigation of alternatives to each.
+Decoupling these three statistical elements will improve methodological comparisons, and thereby advance good distribution modeling practice [@elith2009; @halvorsen2015; @mazzoni2016; @naimi2016; @golding2017].
+
+# Functionality and methods
+
+## Core functionality and novelty
+
+The MIAmaxent R package addresses the needs described above.
+Its functionality primarily concerns the "statistical model" component of distribution modeling process, *sensu* Austin [-@austin2002; see also @halvorsen2012]. 
+It implements variable transformation, maximum entropy fitting, and subset selection, in a modular, adaptable manner [@mazzoni2016]. 
+The name "MIAmaxent" is derived from an early precursor to the package called the "MIA Toolbox" [@mazzoni2015], and signifies a "Modular Integrated Approach" to Maxent. 
+Since maximum entropy fitting by infinitely weighted logistic regression (IWLR) is a trivial task in R, MIAmaxent's most important innovations are its implementations of variable transformation and subset selection.
+Additionally, MIAmaxent provides the option of using standard logistic regression in place of maximum entropy fitting by IWLR, without affecting variable transformation or subset selection.
+MIAmaxent's top-level functions correspond to a workflow that runs from the training data supplied for modeling to prediction and evaluation tools (Fig. 1).
+We note that important distribution modeling considerations independent of the statistical model  --- such as collection of explanatory data, conceptualization of the study area, and treatment of spatial autocorrelation or sampling bias in the occurrence data --- are not addressed in MIAmaxent and must be handled separately.
+Sampling bias (and detection bias) deserves especially careful consideration, because it may severely handicap presence-background models [@phillips2009; @merow2013].
+Model-based sampling bias correction [e.g. @merow2016] is not currently implemented in MIAmaxent, so we recommend correcting sampling bias in training data prior to starting MIAmaxent's workflow, for example by thinning presences [@aiello-lammens2015].
+
+```{r flow_diagram, echo = FALSE, fig.cap = "Figure 1: A workflow diagram for MIAmaxent, showing all top-level functions in red, with short summaries of their inputs and outputs. Parts of the workflow involving variable transformation and model selection are on the left, while parts involving data exploration and model interrogation are on the right."}
+knitr::include_graphics("figs/workflow-flowchart.png")
+```
+
+### Variable transformation
+
+MIAmaxent provides a standard set of transformation types that balances model flexibility and ecological interpretability.
+The set of transformation types implemented in the Maxent software is expanded slightly in MIAmaxent, as proposed by Halvorsen et al. [@halvorsen2013; @halvorsen2015; @mazzoni2015]. 
+Linear transformations are supplemented with an additional monotonous transformation --- the zero-skewness transformation [@okland2001; @okland2003] --- to reflect the fact that the scaling of the explanatory variable (EV) may not be ecologically meaningful for the species in question [@halvorsen2013]. 
+Maxent's quadratic transformation is replaced with a deviation transformation, which produces scaled distances from the EV value with the highest frequency of occurrence.
+As a result, the unimodal response expected based on gradient analysis may be captured by a single deviation-type derived variable (DV) [@halvorsen2015].
+In Maxent, a unimodal response can be captured only through a combination of transformations [@phillips2006; @halvorsen2013].
+MIAmaxent's product transformations are produced during subset selection, and are discussed in the following section.
+Like Maxent, MIAmaxent linearly rescales all DVs to the interval [0,1], which makes the magnitudes of coefficients directly comparable among variables.
+
+In Maxent, the types of transformations applied depends on the number of presences; by default, smaller data sets are restricted to a reduced set of transformation types to avoid overfitting [@phillips2008]. 
+Because the likelihood ratio tests used for subset selection in MIAmaxent account for sample size, MIAmaxent applies all transformation types by default, regardless of the size of the occurrence data set.
+Simultaneously, MIAmaxent offers fine control of which DVs enter into the model, as called for by Halvorsen [-@halvorsen2013].
+For example, a single DV may be removed from the pool of candidates for selection if it is found to produce an ecologically unrealistic or unexpected model response.
+Likewise, different types of transformations may be used for different EVs, and custom DVs may be added. 
+The Maxent software does not offer the same degree of control over variable transformation because it creates DVs and enters these into the model in a single step. 
+Greater control of model specification especially improves MIAmaxent's utility for hypothesis testing with distribution models [@merow2014]. 
+
+In addition to transforming the values of the EVs supplied by the modeler, MIAmaxent also returns the parameterized transformations as functions in R. 
+Together with the model parameters, the parameterized transformations link EVs to model predictions, and comprise a self-contained ecological model whose predictions are easy to reproduce.
+Predictions from models built using the Maxent Java software (although not the maxnet R package) are much more difficult to reproduce because the parameterized transformations are not stored.
+An existing Maxent model can only be projected to new values of EVs by reparameterizing the model with the original training data and settings, or by reproducing its transformations based on the metadata returned by Maxent. 
+
+Finally, we emphasize that variable transformations in MIAmaxent may be used identically for models fitted by maximum entropy or logistic regression.
+With reference to Maxent's variable transformations, Merow et al. [-@merow2014] write: "in principle, this same complexity could be fit in a traditional GLM [logistic regression] but this is typically impractical." 
+MIAmaxent removes this obstacle and makes it easy to create many DVs as candidates for selection in a logistic regression model [@mazzoni2015].  
+
+### Subset selection
+
+MIAmaxent implements subset selection in the form of forward stepwise selection.
+This means that model selection proceeds by adding variables to a minimal starting model, usually one by one, for as long as the improvement in goodness-of-fit outweighs the penalty on complexity.
+A significance test, which explicitly accounts for sample size, is used to compare the more complex model to its nested, simpler alternative [@halvorsen2013].
+Maximum entropy fitting of presence-background models is a special case of classical regression methods [@fithian2013], and its maximum-likelihood interpretation may be used to derive likelihood ratio tests between nested models [@halvorsen2013; @halvorsen2015, Appendix 2]. 
+The significance threshold (alpha) used for likelihood ratio tests may be decided *a priori*, or by choosing a value which maximizes some measure of fit by cross validation or out-of-sample validation.
+The latter has been recommended for setting the strength of lasso regularization in Maxent [@merow2013].
+
+Forward stepwise selection is a less stable process than some other subset selection procedures, because it is a so-called "greedy algorithm," which selects variables in order of greatest explanatory power [@araujo2006; @elith2011].
+Thus, selection order may affect the final result, and the algorithm will not necessarily find the universally optimal subset.
+Bidirectional selection is more likely to reach the universally optimal subset, and best-subset selection will do so by definition, but these algorithms require more computation.
+For best-subset selection in particular, the amount of computation quickly becomes intractable as the number of candidate predictors increases.
+Moreover, empirical comparisons show that forward stepwise selection very frequently yields the same or nearly the same models as bidirectional [@wiegand2010] or best-subset selection [@murtaugh2009].
+Therefore, forward stepwise selection is a computationally efficient choice among forms of subset selection.
+
+MIAmaxent is designed to carry out forward stepwise selection in a two-stage, hierarchical procedure, executed with two different functions (`selectDVforEV()` and `selectEV()`). 
+Because a single EV is generally transformed into multiple DVs, candidates for selection are inherently grouped according to their origin.
+Therefore, MIAmaxent allows the modeler to first select a parsimonious set of DVs for each EV, and then select a parsimonious set of these DV sets --- each representing a single EV [@halvorsen2013].
+During the second stage of the procedure each set of DVs is treated as a unit that cannot be disaggregated, and forward selection proceeds as though the set constitutes an individual variable, while still accounting for each DV as one degree of freedom.
+Hastie et al. [-@hastie2009] recommend this way of handling inherently grouped variables in subset selection. 
+To be clear, EVs do not enter the model in this procedure; instead, MIAmaxent treats the selected set of DVs derived from a given EV as an integral unit that takes the place of the EV.
+Therefore, with regard to MIAmaxent, "selection of EVs" is to be understood as shorthand for "selection of sets of DVs representing EVs".
+The hierarchical selection procedure can also be used to manipulate model complexity; for example, strict DV selection but and lax EV selection will result in model with simple responses to individual EVs, but potentially many EVs. 
+
+A number of additional features in MIAmaxent improve control over the forward stepwise selection process, or aid interpretation of its outcome.
+First, it is possible to start EV selection from a minimal model that includes one or more EVs, by specifying a model `formula`. 
+A priori inclusion of EVs may be desirable when these are known to affect the distribution [-@gelman2006, first general principle for building regression models for prediction]. 
+It is also useful for testing hypotheses.
+Second, first-order interactions between pairs of EVs with individually significant main effects may be tested.
+Interactions are not considered by default because their ecological justification is usually more tenuous than that of main effects [@merow2014].
+Third, MIAmaxent calculates and reports the fraction of null deviance explained for each model along the trail of selection [@mazzoni2015].
+This value is analogous to the R^2^ of least squares regression and termed "D^2^" in MIAmaxent, following Guisan & Zimmerman [-@guisan2000]. 
+It can be used to compare nested models, and to assess the relative contributions of variables in a model [@halvorsen2013]. 
+Note, however, that as a measure of variable contribution, these values are dependent on the order of inclusion in the model, so they should be interpreted with caution [@halvorsen2015]. 
+
+Some authors in the distribution modeling literature recommend prescreening EVs to reduce collinearity between candidates for selection [e.g. @merow2013]. 
+When using the Maxent software, reduced collinearity leads to more interpretable models, since two highly correlated variables may otherwise both be retained under lasso regularization [@merow2013]. 
+With MIAmaxent, subset selection will not retain both of two highly correlated variables unless the second accounts for a significant amount of variation beyond (i.e. orthogonal to) that accounted for by the first. 
+Therefore, prescreening does not make MIAmaxent models more interpretable, and we recommend letting likelihood ratio tests determine which of two highly correlated EVs is the better predictor, except if model predictions are made for new data with changed covariance structure.
+In that case, using ecological knowledge to prescreen for the more proximal variables among correlated sets may reduce the risk associated with collinearity [@austin2002; @dormann2013].
+
+## Additional functionality 
+
+### Data exploration
+
+An intuitive way to explore environment-occurrence relationships manifested in a distribution modeling dataset is to plot occurrence rates against intervals or levels of EVs [@halvorsen2013].
+If the occurrence data comprise presence locations only, this rate reflects frequency of *observed* presence (FOP), while presence-absence data allow quantification of empirical frequency of presence [@stoa2018].
+Hereafter we refer only to plots of FOP, but our statements apply to both rates.
+Examining FOP plots is a useful data exploration step because it allows the modeler to compare prior expectations about occurrence-environment relationships to patterns in the data [@yackulic2013].
+FOP plots reveal patterns of occurrence specific to the study area, which may be contrary to expectations based on ecological knowledge. 
+For example, a species generally considered thermophilic may show higher FOP at cold temperatures if the study area contains only the upper limit of its temperature range. 
+Thus, a FOP plot may help the modeler anticipate the model's behavior.
+Exploring FOP patterns may also guide the choice of transformation types [@halvorsen2013; @merow2013].
+For example, threshold transformations may be turned off if FOP plots show no abrupt shifts.
+Furthermore, MIAmaxent's FOP plots show the relative frequency of EVs values in the dataset (i.e. data density).
+Modeled relationships relate critically to the distributions of EVs in the dataset [@elith2009], and regions of data sparsity identified in a FOP plot may be associated with increased model uncertainty.
+
+### Model interrogation
+
+A basic but often overlooked way to understand a distribution model is to examine its parameter estimates [@yackulic2013].
+Parameter estimates are easily extracted from the model object in MIAmaxent, and should always be reported.
+Since derived variables are always scaled to [0,1], the magnitudes of their coefficients are directly comparable.
+
+Similarly, a response curve is an important and intuitive means to evaluate the ecological plausibility of a model, and response curves should be examined even when the modeling purpose is purely spatial prediction [@merow2013; @merow2014; @jarnevich2015; @guevara2018].
+We recommend specifically that local minima in response curves be treated with skepticism, since these are often artifacts [@elith2009], and ecologically unlikely [@austin2002; @halvorsen2013]. 
+It is especially important to evaluate the trends of a response curve with respect to potential extrapolation; inspecting response curves can help the modeler decide whether "clamping" of predictions --- whereby EV values are constrained to the interval present in the training data --- is desirable [@elith2010; @owens2013; @guevara2018]. 
+
+Model predictions for any supplied values of EVs are returned in the same non-spatial (data frame class) or spatial (raster class) format as the EVs.
+In addition, model predictions are always accompanied by the ranges of the supplied EV values compared to the training data range [0,1], which helps evaluate the risk of speculative extrapolation.
+Predictions from models fitted by maximum entropy are scaled to probability ratio output (PRO) [@halvorsen2013], which can be interpreted as the "relative suitability of one place vs. another" [@elith2011], and has the range (0,$\infty$).
+PRO avoids the problematic assumptions inherent to Maxent's "logistic" and "cloglog" outputs [@merow2013; @hastie2013; @yackulic2013; @phillips2017], as well as the scale-dependence of Maxent's "raw" output [@phillips2008; @halvorsen2013; @merow2013].
+In particular, PRO=1 is a useful reference value that represents the relative suitability of a location randomly chosen from the entire set of training data locations used to parameterize the model, i.e. the suitability of an "average"  training data location [@halvorsen2013]. 
+
+Finally, MIAmaxent can quantify a model's discrimination ability as the area under the curve (AUC) of the receiver operating characteristic [@fielding1997] --- preferably using independent presence-absence occurrence data.
+Evaluation data collected independently of the training data are extremely informative, and should be prioritized more often, especially in the context of projective modeling [@araujo2006; @edvardsen2011; @halvorsen2012; @bahn2013; @araujo2019]. 
+Strict spatial independence between training data and evaluation data may not be achievable, since presences only occur within the spatially autocorrelated distribution of the species, but independently sampled data are a worthwhile alternative.
+To underline the importance of distinguishing between AUC calculated using presence-only or presence-absence data [@yackulic2013], MIAmaxent produces a warning when calculating AUC with presence-only data.
+
+# Examples
+
+Both examples below are easily reproducible in R (version 3.5.2), using the R markdown file used to create this paper, which is archived in Dryad.
+
+## MIAmaxent workflow
+
+In this section we briefly demonstrate a basic modeling workflow in MIAmaxent (Fig. 1).
+An expanded version of this demonstration accompanies the package as a vignette and can be accessed at: <https://cran.r-project.org/web/packages/MIAmaxent/vignettes/a-modeling-example.html>.
+
+```{r load data, include=FALSE}
+library(MIAmaxent)
+traindata <- readData(
+  occurrence=system.file("extdata", "occurrence_PO.csv", package="MIAmaxent"), 
+  contEV=system.file("extdata", "EV_continuous", package="MIAmaxent"),
+  catEV=system.file("extdata", "EV_categorical", package="MIAmaxent"),
+  maxbkg=20000)
+```
+
+The basic data format from which all analysis in MIAmaxent proceeds is a data frame with the response variable (presence/uninformed background or presence/absence) and explanatory variables (EVs).
+The `readData()` function provides convenient data import from spatial data formats commonly used in the Maxent software (CSV coordinates and ASCII raster files using the same coordinate reference system), but may be bypassed if data are already in tabular format.
+The data frame we use in this example, called "traindata," consists of `r format(sum(traindata$RV == 1, na.rm = TRUE), big.mark=",")` presence locations of semi-natural grasslands and `r format(sum(is.na(traindata$RV)), big.mark=",")` uninformed background locations, together with the associated values of `r ncol(traindata) - 1` EVs representing topography, geology, and human infrastructure.
+
+The `plotFOP()` function plots frequency of observed presence (FOP) and data density across the range of a given EV.
+The following command produces a FOP plot (Fig. 2) for terrain slope --- one of the continuous EVs:
+
+```{r figure-2_plotFOP, fig.width=5, fig.height=4, fig.cap = "Figure 2: An example of a frequency of observed presence (FOP) plot for a continuous explanatory variable (EV) --- in this case semi-natural grassland as a function of terrain slope. The plot shows binned occurrence frequencies (black), a local polynomial regression fit of binned occurrence frequencies (red), and the density of EV values in the data set (grey)."}
+FOP <- plotFOP(traindata, "terslpdg", intervals = 20, 
+               main="", xlab="terrain slope (degrees)",
+               ylab="Frequency of Observed Presence")
+```
+
+FOP plots may help guide choice of variable transformation types.
+Based on the plot shown here, for example, the modeler may decide to retain threshold transformations to capture the abrupt decline in observed occurrence at the highest values of the EV.
+
+The `deriveVars()` function produces derived variables (DVs) from EVs by seven different transformation types: linear (L), monotonous (M), deviation (D), forward hinge (HF), reverse hinge (HR), threshold (T), and binary (B).
+The first six of these may be applied to continuous variables, while the binary transformation is only relevant for categorical variables.
+The following command applies all available transformation types (the default): 
+
+```{r deriveVars, message=FALSE}
+DVs <- deriveVars(traindata, transformtype = c("L", "M", "D", "HF", "HR", "T", "B"))
+```
+
+The results of `deriveVars()` comprise varying numbers of DVs for each EV, depending on pre-selection of threshold and hinge transformations of continuous variables, and on the number of levels in categorical variables. 
+DVs for the EV shown in the FOP plot (Fig. 2) consist of:
+
+```{r names DVs}
+names(DVs$dvdata$terslpdg)
+```
+
+Note that the names of DVs are embedded with metadata to indicate the type of transformation was used to create them [@mazzoni2015]. 
+For example, "terslpdg_D2" is the squared deviation from an estimated optimum in "terslpdg" (around 6).
+`deriveVars()` also returns the parameterized transformation function that was used to produce each DV.
+
+In the first stage of model selection, the `selectDVforEV()` function performs forward stepwise selection separately on each group of DVs stemming from a single EV --- selecting those DVs which explain a significant amount of variation in the response variable under the specified significance threshold (default alpha = 0.01): 
+
+```{r selectDVforEV, results='hide'}
+selectedDVs <- selectDVforEV(DVs$dvdata, alpha = 0.01, test = "F", algorithm = "maxent", quiet = TRUE)
+```
+
+`selectDVforEV()` returns two list items: the DVs selected for each EV, and the corresponding trail of forward stepwise selection for each EV.
+The trail of selection for the EV shown in the FOP plot (Fig. 2) is:
+
+```{r selectedDVs trail}
+selectedDVs$selection$terslpdg
+```
+
+Because none of these DVs from this EV accounted for a significant amount of variation in the response variable, the EV was dropped:
+
+```{r summary selectedDVs}
+str(selectedDVs$dvdata, 1)
+```
+
+In the second stage of model selection, the `selectEV()` function selects whole sets of DVs stemming from a single EV --- picking those sets which explain a significant amount of variation in the response variable under the specified significance threshold (default alpha = 0.01):
+
+```{r selectEV, results='hide'}
+selectedEVs <- selectEV(selectedDVs$dvdata, alpha = 0.01, test = "F", algorithm = "maxent", quiet = TRUE)
+```
+
+```{r EV selection trail, echo=FALSE, results='asis'}
+knitr::kable(selectedEVs$selection, caption = "Table 1: An example of a trail of forward selection of explanatory variables (EVs) --- in this case under a significance threshold of alpha = 0.01. Columns represent: the round of EV selection ('round'), the names of the EVs included in the model (\"variables\"), the number of DVs in the model (\"m\"), the fraction of deviance explained (\"Dsq\", sensu Guisan and Zimmerman 2000), the F-statistic for the nested model comparison (\"F\"), the degrees of freedom associated with explained deviance (\"dfe\") and unexplained deviance (\"dfu\"), and the p-value for the F-statistic under the specified degrees of freedom (\"P\").")
+```
+
+`selectEV()` returns three list items: the selected EVs as represented by their DVs, the trail of forward stepwise selection of EVs (Table 1), and the model automatically selected under the specified significance threshold.
+In this case, the automatically selected model contains 20 DVs representing 7 different EVs, and accounts for 3.1 % of null deviance.
+Comparing this model to other models along the same trail of forward selection, the modeler may decide to proceed with the best model containing only 6 EVs, since it accounts for nearly the same fraction of null deviance (Fig. 3).
+
+```{r figure-3_EV-selection, echo=FALSE, fig.width=4, fig.height=4, fig.cap = "Figure 3: An example of the increase in fraction of null deviance accounted for (D^2^) across rounds of forward stepwise selection of explanatory variables (EVs). Each round contains models obtained by adding a single EV to the best model of the previous round. The automatically selected model is shown in red."}
+plot(selectedEVs$selection$round, selectedEVs$selection$Dsq, 
+     xlab="round of selection", ylab=parse(text="D^2"))
+round <- max(selectedEVs$selection$round[which(selectedEVs$selection$P < 0.01)])
+Dsq <- selectedEVs$selection[selectedEVs$selection$round==round,"Dsq"][1]
+points(round, Dsq, pch=16, col="red")
+```
+
+The `chooseModel()` function returns the model specified by a supplied formula object, and may be used to pick a simpler model from the trail of forward EV selection:
+
+```{r chooseModel}
+mod <- chooseModel(selectedDVs$dvdata, formula = "~ prbygall + lcucor1 + geoberg + tertpi09 + pca1 + geolmja1")
+```
+
+Model parameters are stored as "alpha" and "beta" following the notation of Elith et al. [-@elith2011] and Fithian & Hastie [-@fithian2013]. 
+A vector of model predictions in probability ratio output (PRO) format is given by:
+$$\dot{q} = N \cdot e^{ \, \alpha \, + \, \sum_{k=1}^{m} \beta_k x_{ik} }$$
+where $N$ is the number of background locations, $\alpha$ is a normalizing constant, $\beta$ is a vector of coefficients, and $x$ is a matrix of DVs.
+
+To assess how well the model captured empirical occurrence-environment relationships, response curves may be compared to their corresponding FOP plots (Fig. 4).
+Note that where the response curve deviates strongly from the pattern in FOP, data density is very low.
+
+```{r figure-4_plotResp, echo=FALSE, fig.width=5, fig.height=9, fig.cap = "Figure 4: The frequency of observed presence plot (top) and single-effect response plot (bottom) for the most important explanatory variable (EV) in the exemplified model."}
+op <- par(mfrow=c(2,1))
+FOP <- plotFOP(traindata, "prbygall", intervals = 20, main="plotFOP()", 
+               xlab="density of buildings", ylab="Frequency of Observed Presence")
+par(mar = (c(4, 4, 4, 4) + 0.3))
+plotResp(mod, DVs$transformations, "prbygall", main="plotResp()", 
+         xlab="density of buildings", ylab="Probability Ratio Output", las=1)
+par(op)
+```
+
+The `projectModel()` function produces model predictions from a model object, the transformations used to create its DVs, and any values of EVs:
+
+```{r projectModel}
+preds <- projectModel(mod, DVs$transformations, traindata)
+```
+
+It also compares univariate ranges of the EV data in the projection to the ranges of the same EVs in the training data (scaled to [0,1]).
+Values of categorical EVs are classified as "inside" or "outside" the range of values present in the training data. 
+Since we projected our model across the same data used to train it, all ranges are identical:
+
+```{r projectModel ranges}
+preds$ranges
+```
+
+The `testAUC()` function calculates AUC for a given model based on evaluation data comprising occurrence data and the corresponding EV values. 
+Preferably, the occurrence data include absences as well as presences.
+Plotting the receiver operating characteristic (ROC) curve is optional:
+
+```{r eval data, include=FALSE}
+evaldata <- readData(occurrence = system.file("extdata", "occurrence_PA.csv", package="MIAmaxent"), contEV = system.file("extdata", "EV_continuous", package="MIAmaxent"), catEV = system.file("extdata", "EV_categorical", package="MIAmaxent"), PA = TRUE, XY = TRUE)
+```
+
+```{r testAUC}
+testAUC(mod, DVs$transformations, data = evaldata, plot = FALSE)
+```
+
+The workflow above builds maximum entropy models based on presence-only occurrence data, through infinitely weighted logistic regression (IWLR). 
+One useful feature of the MIAmaxent package is that the entire workflow can be adapted to presence-absence data and standard logistic regression (LR) models by changing a single setting (algorithm = "LR") in functions that perform model fitting.
+Replacing three commands above with their counterparts below would result in a statistical approach identical in variable transformation and model selection, but with maximum entropy models replaced by logistic regression models:
+
+```{r algorithm LR, eval=FALSE}
+DVs <- deriveVars(traindata, transformtype = c("L", "M", "D", "HF", "HR", "T", "B"), algorithm = "LR")
+selectedDVs <- selectDVforEV(DVs$dvdata, alpha = 0.01, test = "F", algorithm = "LR")
+selectedEVs <- selectEV(selectedDVs$dvdata, alpha = 0.01, test = "F", algorithm = "LR")
+```
+
+## MIAmaxent-maxnet comparison
+
+In this section we use an example data set to compare a maximum entropy model built using MIAmaxent (version 1.1.0) to one built using Maxent's R package equivalent, maxnet (version 0.1.2).
+As detailed above, the form of these models is identical (Appendix A3).
+The primary difference between the two approaches is in model selection, where MIAmaxent uses subset selection, while maxnet uses lasso regularization. 
+Another, smaller difference is that MIAmaxent automatically adds all presence locations to the background prior to maximum entropy model fitting by IWLR, because the background should be representative of all conditions in the study area [@halvorsen2012; @renner2015]; maxnet does not add presences to the background.
+For increased comparability, we do not use threshold transformations or interaction terms in either MIAmaxent or maxnet.
+
+
+We compare the resulting models in terms of two crucial, linked qualities: their discrimination ability and their complexity.
+It is useful to examine these two qualities together because there exists an optimal level of complexity that maximizes discrimination ability on holdout or independent data [@hastie2009].
+We quantify discrimination ability as AUC from spatially stratified cross validation.
+Spatially stratified cross validation is less likely than randomly partitioned cross validation to overestimate predictive performance due to spatial autocorrelation [@veloz2009; @wenger2012; @radosavljevic2014], so it is a good way to assess predictive power when independent evaluation data are not available.
+We assess model complexity by the number of parameters and shapes of response curves [like @merow2014].
+
+The example data we use are described in the paper that introduced Maxent [@phillips2006], and are available for download from: <https://biodiversityinformatics.amnh.org/open_source/maxent/>.
+They consist of occurrence records for the brown-throated three-toed sloth (*Bradypus variegatus*), and 14 EVs representing climate, elevation, and potential vegetation categories.
+For both modeling approaches, we find an optimal level of model complexity by calculating AUC under various strengths of complexity penalty, as recommended by Merow et al. [-@merow2013].
+For the MIAmaxent approach this means varying the significance threshold (alpha) in forward stepwise selection, and for the maxnet approach it means varying the regularization multiplier.
+
+```{r MIAmaxent-maxnet comparison setup, include=FALSE}
+calcAUC <- function(preds, labels) {
+  cont <- as.matrix(table(preds, labels))
+  cont <- cont[order(as.numeric(rownames(cont)), decreasing = T), ]
+  falspos <- c(0, unname(cumsum(cont[, "0"])))
+  truepos <- c(0, unname(cumsum(cont[, "1"])))
+  fpr <- falspos/sum(cont[, "0"])
+  tpr <- truepos/sum(cont[, "1"])
+  hgtl <- tpr[-length(tpr)]
+  hgtr <- tpr[-1]
+  wdth <- diff(fpr)
+  sum(((hgtl + hgtr)/2) * wdth)
+}
+```
+
+```{r bradypus data import, include=FALSE}
+library(raster) 
+# data from: https://biodiversityinformatics.amnh.org/open_source/maxent/
+occs <- read.csv(file.path("tutorial-data", "samples", "bradypus.csv"))[,2:3]
+envs <- stack(list.files(file.path("tutorial-data", "layers"), full.names = TRUE))
+names(envs) <- make.names(names(envs), allow_ = F)
+bb <- bbox(SpatialPoints(occs))
+bb.buf <- extent(bb[1]-10, bb[3]+10, bb[2]-10, bb[4]+10)
+envs.crop <- crop(envs, bb.buf)
+```
+
+```{r bradypus data setup, eval=FALSE, include=FALSE}
+# To work around issue of raster::as.data.frame and raster::extract behaving inconsistently between machines (xy cbind order, and different cells for coordinates on cell borders), data is prepared to a data frame once and saved.
+library(raster) 
+envdata <- as.data.frame(envs.crop, xy=TRUE, na.rm=TRUE)
+envdata$ecoreg <- as.factor(envdata$ecoreg)
+prescells <- cellFromXY(envs.crop, occs)
+d <- data.frame(presence=as.numeric(rownames(envdata) %in% prescells), envdata)
+
+blocks <- ENMeval::get.block(d[d$presence==1,2:3], d[d$presence==0,2:3])
+d <- data.frame(block=numeric(nrow(d)), d)
+d[d$presence==1, "block"] <- blocks$occ.grp
+d[d$presence==0, "block"] <- blocks$bg.grp
+
+saveRDS(d, file.path("example_files", "bradypus_data.RDS"))
+```
+
+```{r figure-5_bradypus-map, echo=FALSE, fig.width=5, fig.height=5, fig.cap = "Figure 5: Presence locations of *Bradypus variegatus* in Central and South America, colored according their cross-validation data partition, plotted across the modeling area."}
+d <- readRDS(file.path("example_files", "bradypus_data.RDS"))
+library(raster)
+op <- par(mar=c(0,0,0,0)+0.1)
+plot(envs.crop[[1]], col="grey", legend=FALSE, xaxt='n', yaxt='n')
+points(d[d$presence==1,3:4], pch=21, bg=d[d$presence==1,1])
+par(op)
+```
+
+For spatially stratified cross-validation, we group `r sum(d$presence)` presence records of *B. variegatus* into four data partitions (Fig. 5).
+Specifically, we use the "block" partitioning method in the "ENMeval" package (version 0.3.0), which finds lines of latitude and longitude that divide the area into partitions holding equal numbers of records [@muscarella2014].
+Although not shown in the figure, uninformed background locations are partitioned into the same four geographic strata as the presences.
+
+```{r bradypus tuning, include=FALSE}
+alphavector <- c(0.1,0.05,0.01,0.001,1e-6,1e-9)
+lambdavector <- c(1,2,4,8,16,32)
+MIAmaxent <- matrix(nrow = 4, ncol = 6)
+colnames(MIAmaxent) <- alphavector
+maxnet <- matrix(nrow = 4, ncol = 6)
+colnames(maxnet) <- lambdavector
+AUC <- list(MIAmaxent=MIAmaxent, maxnet=maxnet)
+
+for (i in 1:4) {
+  print(i)
+  train <- d[!d$block==i,]
+  set.seed(42)
+  train <- train[c(which(train$presence==1), sample(which(train$presence==0), 10000)), ]
+  test <- d[d$block==i,]
+  set.seed(42)
+  test <- test[c(which(test$presence==1), sample(which(test$presence==0), 10000)), ]
+  traindata <- train[,-c(1,3:4)]
+  testdata <- test[,-c(1,3:4)]
+  
+  DVs <- MIAmaxent::deriveVars(traindata, transformtype = c("L", "M", "D", "HF", "HR", "B")) # no threshold type
+  for (j in 1:6) {
+    alph <- alphavector[j]
+    selectedDVs <- MIAmaxent::selectDVforEV(DVs$dvdata, alpha = alph)
+    selectedEVs <- MIAmaxent::selectEV(selectedDVs$dvdata, alpha = alph)
+    AUCcv <- MIAmaxent::testAUC(selectedEVs$selectedmodel, DVs$transformations, testdata, plot=FALSE)
+    AUC$MIAmaxent[i,j] <- AUCcv 
+  
+    lambda <- lambdavector[j]
+    p <- traindata[,1]
+    maxnetdata <- traindata[,-1]
+    mod <- maxnet::maxnet(p, maxnetdata, maxnet::maxnet.formula(p, maxnetdata, classes="lqh"), regmult=lambda) # no interactions
+    preds <- predict(mod, testdata[,-1], clamp=T, type="exponential")
+    AUCcv <- calcAUC(preds, testdata[,1])
+    AUC$maxnet[i,j] <- AUCcv 
+  }
+}
+```
+
+```{r figure-6_bradypus-tuning, eval=TRUE, echo=FALSE, fig.width=7, fig.height=5, fig.cap = "Figure 6: Discrimination abilities of distribution models of *Bradypus variegatus* produced by MIAmaxent (dark grey) and maxnet (light grey) under various strengths of complexity penalty, calculated by spatially stratified cross validation. For the MIAmaxent and maxnet models of optimal complexity, the evidence against the hypothesis that their cross validated AUC values have equal population means (p), is weak."}
+btuning <- AUC
+opt.alpha <- as.numeric(names(which.max(apply(btuning$MIAmaxent, 2, mean)))) #0.7101768
+opt.lambda <- as.numeric(names(which.max(apply(btuning$maxnet, 2, mean)))) #0.738618
+inference <- t.test(btuning$MIAmaxent[,which.max(apply(btuning$MIAmaxent, 2, mean))], 
+                    btuning$maxnet[,which.max(apply(btuning$maxnet, 2, mean))], 
+                    paired = TRUE)
+# t = -0.8366, df = 3, p-value = 0.4642
+# alternative hypothesis: true difference in means is not equal to 0
+# 95 percent confidence interval:
+#  -0.13663179  0.07974931
+# sample estimates:
+# mean of the differences 
+#             -0.02844124
+
+op <- par(mar=c(5,4,2,2)+0.1)
+p <- barplot(c(apply(btuning$MIAmaxent, 2, mean), 
+               apply(btuning$maxnet, 2, mean)),
+             col=c(rep("grey40",6),rep("grey80",6)),
+             ylab="cross validated AUC",
+             ylim=c(0.5,1), xpd=F,
+             space=c(rep(0.2,6),1.2,rep(0.2,5)), las=2)
+mtext(c("significance threshold", "regularization multiplier"), side=1, line = 4, 
+      at=c(mean(p[1:6,1]), mean(p[7:12,1])))
+text(x=c(mean(p[1:6,1]), mean(p[7:12,1])), y=1, pos=1, c("MIAmaxent", "maxnet"), cex=1.5)
+h <- 0.75; lines(p[c(2,2,10,10)],c(h-.005,h,h,h-.005))
+text(mean(p[c(2,10)]), h, "p = 0.464", pos=3, offset=.2, cex=1)
+par(op)
+```
+
+```{r bradypus MIAmaxent model, include=FALSE}
+set.seed(42)
+alltrain <- d[c(which(d$presence==1), sample(which(d$presence==0), 10000)), ]
+alltrain <- alltrain[,-c(1,3:4)]
+DVs <- MIAmaxent::deriveVars(alltrain, transformtype = c("L", "M", "D", "HF", "HR", "B"), quiet=TRUE)
+selectedDVs <- MIAmaxent::selectDVforEV(DVs$dvdata, alpha = opt.alpha, quiet = TRUE)
+selectedEVs <- MIAmaxent::selectEV(selectedDVs$dvdata, alpha = opt.alpha, quiet = TRUE)
+MIAmaxent_model <- selectedEVs$selectedmodel
+sum(!MIAmaxent_model$betas==0) #11
+length(unique(gsub("_(.*)", "",names(MIAmaxent_model$betas)))) #5
+```
+
+```{r bradypus maxnet model, include=FALSE}
+p <- alltrain[,1]
+maxnetdata <- alltrain[,-1]
+maxnet_model <- maxnet::maxnet(p, maxnetdata, maxnet::maxnet.formula(p, maxnetdata, classes="lqh"), regmult=opt.lambda)
+sum(!maxnet_model$betas==0) #12
+sum(sapply(names(alltrain), function(x) {any(grepl(x, names(maxnet_model$betas)))})) #10
+```
+
+```{r MIAmaxentMargResp, include=FALSE}
+# Function modified from MIAmaxent::plotResp2 to return data
+MIAmaxentMargResp <- function (model, transformations, EV) {
+  evbetas <- model$betas[grep(paste0(EV, "_"), names(model$betas))]
+  evbetasni <- evbetas[!grepl(":", names(evbetas), fixed = TRUE)]
+  if (length(evbetasni) == 0) {
+    stop("The 'EV' specified cannot be found in the model")
+  }
+  betasni <- model$betas[!grepl(":", names(model$betas), fixed = TRUE)]
+  alltransf <- MIAmaxent:::.load.transf(transformations)
+  modtransfs <- alltransf[match(paste0(names(betasni), "_transf"), 
+                                names(alltransf), nomatch = 0)]
+  if (!(length(modtransfs) == length(betasni))) {
+    stop("The transformation function for at least one DV in the model is missing")
+  }
+  anevtransf <- modtransfs[[paste0(names(evbetasni)[1], "_transf")]]
+  evnull <- environment(anevtransf)$xnull
+  if (class(evnull) %in% c("numeric", "integer")) {
+    seq <- seq(min(evnull), max(evnull), length.out = 100)
+  }
+  if (class(evnull) %in% c("factor", "character")) {
+    seq <- levels(as.factor(evnull))
+  }
+  marginal <- grepl(paste0(EV, "_"), names(betasni))
+  newdata <- mapply(function(f, marginal, seq) {
+    if (marginal) {
+      dv <- f(seq)
+    }
+    else {
+      x <- environment(f)$xnull
+      if (class(x) %in% c("numeric", "integer")) {
+        dvmean <- f(mean(x, na.rm = TRUE))
+        dv <- rep(dvmean, length(seq))
+      }
+      if (class(x) %in% c("factor", "character")) {
+        ux <- unique(x)
+        mode <- ux[which.max(tabulate(match(x, ux)))]
+        dvmode <- f(mode)
+        dv <- rep(dvmode, length(seq))
+      }
+    }
+    return(dv)
+  }, modtransfs, marginal, MoreArgs = list(seq = seq))
+  colnames(newdata) <- names(betasni)
+  newdata <- as.data.frame(newdata)
+  preds <- stats::predict(model, newdata)
+  resp <- data.frame(EV = seq, preds = preds)
+  return(resp)
+}
+```
+
+```{r maxnetMargResp, include=FALSE}
+# Function modified from maxnet:::response.plot to return data
+maxnetMargResp <- function (mod, v, type, mm = mod$samplemeans, min = mod$varmin[v], 
+                            max = mod$varmax[v], levels = unlist(mod$levels[v])) {
+  nr <- if (is.null(levels)) {100
+    } else  {length(levels)}
+  m <- data.frame(matrix(mm, nr, length(mm), byrow = T))
+  colnames(m) <- names(mm)
+  m[, v] <- if (!is.null(levels)) {levels
+    } else {seq(min, max, length = 100)}
+  preds <- maxnet:::predict.maxnet(mod, m, type = type)
+  return(data.frame(EV=m[, v], preds=preds))
+}
+```
+
+```{r figure-7_model-responses, echo=FALSE, fig.width=10, fig.height=5, fig.cap = "Figure 7: Marginal-effect responses in distribution models of *Bradypus variegatus* made with MIAmaxent (dashed lines/empty bars) or maxnet (continuous lines/filled bars). The MIAmaxent model does not contain any of the explanatory variables in the bottom row. Responses are shown in \"exponential\" output (i.e. $\\dot{q}/N$ in eq. 1). Scales of y-axes differ across plots."}
+EVvector1 <- unique(gsub("_(.*)", "",names(MIAmaxent_model$betas)))
+EVvector2 <- names(alltrain)[sapply(names(alltrain), function(x) {any(grepl(x, names(maxnet_model$betas)))})]
+sharedEV <- EVvector1[EVvector1 %in% EVvector2]
+exclusiveEV <- EVvector2[!(EVvector2 %in% EVvector1)]
+
+op <- par(mfrow=c(2,5), mar=c(4,2,2,1)+0.1)
+for (i in sharedEV) {
+  MIA <- MIAmaxentMargResp(MIAmaxent_model, DVs$transformations, i)
+  N <- sum(MIAmaxent_model$data[, "RV"] == 0)
+  MIA[,"preds"] <- MIA[,"preds"]/N
+  max <- maxnetMargResp(maxnet_model, i, type="exponential")
+  if (class(max[,1])=="numeric") {
+    plot(max[,1], max[,2], xlab = i, ylab="exponential", type = "l", 
+         ylim = range(c(MIA[,2], max[,2])))
+    points(MIA[,1], MIA[,2], type="l", lty=2)
+  } else {
+    graphics::barplot(t(matrix(c(MIA[,2], max[,2]), ncol=2)), names.arg = MIA[,1], 
+                      xlab = i, ylab = "exponential", beside=TRUE, col=c("white", "black"), 
+                      ylim = range(pretty(range(c(MIA[,2], max[,2])))))
+  }
+}
+for (i in exclusiveEV) {
+  max <- maxnetMargResp(maxnet_model, i, type="exponential")
+  if (class(max[,1])=="numeric") {
+    plot(max[,1], max[,2], xlab = i, ylab="exponential", type = "l")
+  } else {
+    graphics::barplot(max[,2], names.arg = MIA[,1], xlab = i, 
+                      ylab ="exponential", col="black")
+  }
+}
+par(op)
+```
+
+Optimal model complexity is reached under a significance threshold of `r opt.alpha` in MIAmaxent and under a regularization multiplier of `r opt.lambda` in maxnet (Fig. 6). 
+The optimal MIAmaxent model shows marginally poorer AUC than the optimal maxnet model (mean difference: 0.028, 95 % confidence interval for true difference in means from paired t-test: [-0.080, 0.137]).
+The optimal MIAmaxent model contains 11 DVs representing 5 EVs, while the maxnet model contains 12 DVs representing 10 EVs (Fig. 7; Appendix A4).
+In summary, the model produced by maxnet predicts marginally better than the model produced by maxnet, but it is less interpretable.
+However, spatially stratified cross validation does not completely eliminate spatial autocorrelation and shared sampling bias between training and test partitions, so measures of predictive performance obtained by this procedure may favor overfitted models [@merow2014].
+Therefore, independent test data might have shown the simpler MIAmaxent model to perform relatively better. 
+
+These results are in line with previous findings that models selected by subset selection maintain high predictive performance but are simpler and more ecologically meaningful than models selected by lasso regularization [e.g. @halvorsen2015; @halvorsen2016]. 
+To illustrate, consider the response curves in Figure 7; the MIAmaxent model predicts highest occurrence of brown-throated three-toed sloth at an intermediate level of precipitation that is lower in July (pre6190.l10) than October (pre6190.l7), while the maxnet model predicts highest occurrence at precipitation levels that are low in January (pre6190.l1), high in April (pre6190.l4), low in July (pre6190.l7), high in October (pre6190.l10), and annually low (pre6190.ann). 
+The response of the model produced by subset selection is clearly easier to justify ecologically. 
+
+# Installation and citation
+
+The latest release version of the MIAmaxent package (currently version 1.1.0) can be installed from CRAN (Comprehensive R Archive Network) using the following command:
+```{r installation, eval=FALSE}
+install.packages("MIAmaxent")
+```
+
+The package's GitHub page (<https://github.com/julienvollering/MIAmaxent>) may be used to report issues, contribute to the source code, or download the development version.
+To cite MIAmaxent, please cite this paper.
+
+# Conclusion
+
+To summarize: of the three core modeling elements in the Maxent software, MIAmaxent (1) retains and slightly expands variable transformation, (2) retains maximum entropy fitting, with the option for standard logistic regression fitting, and (3) replaces lasso regularization with model selection by subset selection.
+MIAmaxent's decoupling of these three elements gives greater flexibility in statistical approaches and promotes fair methodological comparisons.
+For example, by providing a feasible alternative to Maxent's lasso regularization, MIAmaxent makes it easier to investigate whether this form of model selection is responsible for high predictive performance of models produced by Maxent.
+Similarly, MIAmaxent facilitates fair comparison between maximum entropy models built using presence-only data and logistic regression models built using presence-absence data, by providing identical functionality for both.
+Modelers with access to both kinds of data sets may test which models show better performance, without confounding effects from differences in variable transformation or model selection [@guillera-arroita2014].
+In other words, MIAmaxent can help disentangle the effect of the fitting algorithm from effects of other elements in the statistical approach.
+Asking why and when particular methodologies are advantageous is critical to advancing good distribution modeling practice [@elith2009]
+
+Many authors have called for distributions modelers to consider more explicitly the ecological theory upon which their model is based [@austin2002; @austin2007; @elith2009a; @warren2012; @halvorsen2012], and MIAmaxent grounds the practice of maximum entropy distribution modeling more strongly in ecological knowledge.
+MIAmaxent moves maximum entropy distribution models towards the "data modeling" school of statistical modeling (away from "algorithmic modeling"), by placing a higher premium on interpretable models [@breiman2001; @warren2011].
+The most important change that MIAmaxent implements to cause this shift is to select models by subset selection instead of lasso regularization.
+Any distribution modeling approach --- including how the model is produced and how it is evaluated --- must be adapted to the purpose of the study and the characteristics of the data [@halvorsen2012; @merow2014], as no single approach is most suitable for all studies [@qiao2015; @mazzoni2016; @escobar2018].
+MIAmaxent expands a distribution modeler's statistical toolbox, and for studies aiming to do something other than predict with minimal error the geographic distribution of the modeled target in the same spatial and temporal context as the data, MIAmaxent may frequently be more suitable than the Maxent software.
+
+# Acknowledgments
+
+Thank you to Knut Rydgren and Inger Auestad for constructive comments on an earlier version of this paper. Thank you also to two anonymous reviewers whose suggestions improved the paper. 
+
+# Data Accessibility
+
+The data used in the "MIAmaxent workflow" example accompany the MIAmaxent package (version 1.1.0), while those used in the "MIAmaxent-maxnet comparison" accompany the maxnet package (version 0.1.2). 
+Both are available from the Comprehensive R Archive Network (<https://cran.r-project.org/>). This whole paper is fully reproducible from an R-markdown file that is available on GitHub (<https://github.com/julienvollering/MIAmaxent-paper>).
+
+# Competing Interests
+
+The authors declare no conflicts of interest.
+
+# Author Contributions
+
+JV designed and coded the MIAmaxent package, and drafted the paper. 
+RH conceived the theoretical approach underlying the package, and critically revised the paper. 
+SM conceived the MIAmaxent package and developed its underlying informatics approach, provided data for the example, and reviewed the paper.
+
+# Appendix
+
+## A1: Deviation of expected values from empirical values under increasing lasso regularization
+Regularization loosens the constraint on the maximum entropy distribution that the expected value of each predictor must match its observed mean.
+As a result, increasing the regularization multiplier to decrease model complexity has the effect that predictions are no longer fully consistent with the data [@merow2013, see also accompanying Figure D2 in Appendix 4].
+Subset selection does not have the same effect (Fig. A1).
+
+```{r figure-A1_regularization-relaxation, echo=FALSE, fig.height=3, fig.width=10, fig.cap="Figure A1: Deviation of expected values of predictions from the observed mean in the data, under three regularization scenarios (maxnet lasso regularization multiplier = 1, 10, 50). Deviations in models using lasso regularization are compared to deviations in unregularized models using the same set of predictors."}
+#get bradypus data
+data("bradypus", package="maxnet")
+dat <- bradypus
+names(dat) <- make.names(names(dat), allow_ = F)
+dat <- dat[, lapply(dat, class) %in% c("numeric", "integer")]
+rescale <- function(x) {(x - min(x))/diff(range(x))}
+dat <- data.frame(lapply(dat, rescale))
+
+# observed means:
+empirical <- sapply(dat[,-1], weighted.mean, w=dat[,1])
+
+# maxnet data 
+dat2 <- dat
+presences <- dat[dat$presence==1,]
+presences$presence <- 0
+dat2 <- rbind(dat2, presences)
+
+# reg mult 1, 10, 50:
+par(mfrow=c(1,3))
+for (i in c(1,10,50)) {
+  x <- i
+  m1 <- maxnet::maxnet(dat2[,1], dat2[,-1], 
+                       maxnet::maxnet.formula(dat2[,1], dat2[,-1], classes="l"), 
+                       regmult = x)
+  regdiff <- sapply(dat[,-1], weighted.mean, 
+                    w=maxnet:::predict.maxnet(m1, dat, type = "exponential")) - empirical
+  regdiff <- regdiff[names(regdiff) %in% names(m1$betas)]
+  # no shrinkage:
+  f <- formula(paste0("presence~", paste0(names(m1$betas), collapse = "+")))
+  m2 <- MIAmaxent:::.runIWLR(f, dat)
+  subsetdiff <- sapply(dat[,-1], weighted.mean, 
+                       w=MIAmaxent:::predict.iwlr(m2, dat)) - empirical
+  subsetdiff <- subsetdiff[names(subsetdiff) %in% names(m1$betas)]
+  
+  plot(regdiff, pch=1, ylim = c(-0.1, 0.1), cex=1.5, cex.lab=1,
+       xlab = "predictor", ylab="difference of expected value from observed mean", 
+       main = paste0("reg.mult=",x), las=1)
+  points(subsetdiff, pch=4, cex=1.5)
+  legend("bottomleft", c("lasso", "subset"), pch=c(1,4), cex=1)
+}
+```
+
+## A2: Model building using subset or shrinkage methods
+Dahlgren [-@dahlgren2010] presented shrinkage methods and particularly the lasso as good alternatives to subset selection methods for model building with ecological data when the data comprise few observations and many candidate explanatory variables.
+He also advocates for avoiding model building altogether by using full models when the number of observations is sufficiently high and there is no strong collinearity between variables.
+Our plotting of his Table 1 results (Fig. A2) suggests that, in data sets of more than 20-30 observations per candidate explanatory variable, neither the lasso nor subset selection strongly improve prediction error compared to the full model, but subset selection results in more interpretable and parsimonious models than the lasso.   
+
+```{r figure-A2_Dahlgren2010table1, echo=FALSE, fig.height=7, fig.width=5, fig.cap="Figure A2: Improvement in mean squared prediction error (top panel) and reduction in number of predictors (bottom panel) by lasso regularization and subset selection, as the ratio of observations to candidate predictors increases. Note that higher values on the y-axis in the bottom panel represent simpler models. Data from Table 1 in Dahlgren 2010."}
+dat <- read.csv("Dahlgren2010.csv")
+
+par(mfrow=c(2,1), mar=c(5,4,1,2)+0.1)
+dat$lassoimprove <- (dat$fullMSPE - dat$lassoMSPE)/dat$fullMSPE
+dat$ssimprove <- (dat$fullMSPE - dat$ssMSPE)/dat$fullMSPE
+plot(dat$obs/dat$pred, dat$lassoimprove, 
+     ylim=c(min(c(dat$lassoimprove,dat$ssimprove)), max(c(dat$lassoimprove,dat$ssimprove))),
+     xlab="ratio of observations:predictors", ylab="prediction error improvement")
+points(dat$obs/dat$pred, dat$ssimprove, pch=4)
+abline(h=0, lty=2)
+legend("topright", c("lasso", "subset"), pch=c(1,4))
+
+dat$lassored <- (dat$pred - dat$lassono)/dat$pred
+dat$ssred <- (dat$pred - dat$ssno)/dat$pred
+plot(dat$obs/dat$pred, dat$lassored, 
+     ylim=c(0, max(c(dat$lassored,dat$ssred))),
+     xlab="ratio of observations:predictors", ylab="reduction in number of predictors")
+points(dat$obs/dat$pred, dat$ssred, pch=4)
+abline(h=0, lty=2)
+legend("topright", c("lasso", "subset"), pch=c(1,4))
+```
+
+## A3: Conditional equivalence of maximum entropy models in "MIAmaxent" and "maxnet" packages
+If presence observations are included in the background manually, and regularization is close to zero, predictions from models built using the "maxnet" package are near equivalent to predictions from models built using the "MIAmaxent" package (Fig. A3).
+Note that regularization cannot be turned off entirely in the maxnet package.
+
+```{r figure-A3_maxnet-MIAmaxent-equivalence, echo=FALSE, fig.height=4, fig.width=4, fig.cap="Figure A3: Near equivalence of \"MIAmaxent\" predictions and \"maxnet\" predictions, when maxnet uses a regularization multiplier close to zero and presence observations as part of the background. This illustration uses the \"bradypus\" data set from the maxnet package."}
+#get bradypus data
+data("bradypus", package="maxnet")
+dat <- bradypus
+names(dat) <- make.names(names(dat), allow_ = F)
+dat <- dat[, lapply(dat, class) %in% c("numeric", "integer")]
+rescale <- function(x) {(x - min(x))/diff(range(x))}
+dat <- data.frame(lapply(dat, rescale))
+
+f <- formula(paste0("presence~", paste0(names(dat)[-1], collapse = "+")))
+m1 <- MIAmaxent:::.runIWLR(f, dat)
+
+dat2 <- dat
+presences <- dat[dat$presence==1,]
+presences$presence <- 0
+dat2 <- rbind(dat2, presences)
+m2 <- maxnet::maxnet(dat2[,1], dat2[,-1], 
+                     maxnet::maxnet.formula(dat2[,1], dat2[,-1], classes="l"), 
+                     regmult = .001)
+
+plot(MIAmaxent:::predict.iwlr(m1, dat, "raw"), 
+     maxnet:::predict.maxnet(m2, dat, type = "exponential"), 
+     xlab = "MIAmaxent predictions", ylab = 'maxnet predictions')
+```
+
+## A4: Parameters of optimal models in "MIAmaxent-maxnet comparison" section
+
+```{r MIAmaxent-maxnet comparison model parameters, echo=FALSE, results='asis'}
+df <- as.data.frame(MIAmaxent_model$betas)
+df <- rbind(df, alpha = MIAmaxent_model$alpha)
+colnames(df) <- "value"
+knitr::kable(df)
+df <- as.data.frame(maxnet_model$betas)
+df <- rbind(df, alpha = maxnet_model$alpha)
+colnames(df) <- "value"
+knitr::kable(df)
+```
+
+# sessionInfo
+```{r sessionInfo}
+capture.output(sessionInfo(), file="sessionInfo.txt")
+```
+
+
+# References
