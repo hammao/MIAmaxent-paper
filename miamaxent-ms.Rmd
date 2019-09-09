@@ -44,7 +44,7 @@ MIAmaxent R package
 # Abstract
 
 The widely used "Maxent" software for modeling species distributions from presence-only data [@phillips2006] tends to produce models with high predictive performance but low ecological interpretability, and implications of Maxent's statistical approach to variable transformation, model fitting, and model selection remain under-appreciated.
-In particular, Maxent's approach to model selection through lasso regularization has been shown to give less parsimonious distribution models --- i.e. models which are more complex but not necessarily predictively better --- than subset selection.
+In particular, Maxent's approach to model selection through lasso regularization has been shown to give less parsimonious distribution models --- that is, models which are more complex but not necessarily predictively better --- than subset selection.
 In this paper we introduce the MIAmaxent R package, which provides a statistical approach to modeling species distributions similar to Maxent's, but with subset selection instead of lasso regularization.
 The simpler models typically produced by subset selection are ecologically more interpretable, and making distribution models more grounded in ecological theory is a fundamental motivation for using MIAmaxent.
 To that end, the package executes variable transformation based on expected occurrence-environment relationships, and contains tools for exploring data and interrogating models in light of knowledge of the modeled system.
@@ -66,7 +66,7 @@ As a result, Maxent quickly became a very popular tool for distribution modeling
 Recently, the Java software (currently version 3.4.1) was also adapted into an R package called "maxnet" [@phillips2017, currently version 0.1.2]. 
 For the remainder of this paper we refer primarily to the Maxent Java software, but our statements are equally applicable to the maxnet R package. 
 
-The core functionality of the Maxent software is a statistical approach that comprises three linked main elements: (1) variable transformation ("feature creation" in Maxent's terminology), (2) maximum entropy fitting, and (3) lasso regularization. 
+The core functionality of the Maxent software is a statistical approach that comprises three linked, main elements: (1) variable transformation ("feature creation" in Maxent's terminology), (2) maximum entropy fitting, and (3) lasso regularization. 
 Variable transformation expands explanatory variables (EVs) into a larger set of derived variables (DVs), the maximum entropy fitting algorithm finds parameter estimates, and lasso regularization reduces model overfitting.
 Maxent implements these three elements together owing to its origins in the field of machine learning [@phillips2004; @phillips2006; @elith2011; @merow2013].
 However, there is no reason that variable transformation, maximum entropy fitting, and lasso regularization must be used in tandem; for example, a maximum entropy distribution model might equally be fit without variable transformation or by a different model selection technique. 
@@ -121,7 +121,7 @@ Maximum entropy fitting gives the estimate of occurrence density that is maximal
 A minimally presumptive model fit may be especially appropriate for the opportunistically collected presence-only data commonly used for distribution modeling, since frequent artifacts in these data --- e.g., resulting from sampling bias [@stoa2018] --- may easily be inherited by overfitted models.
 For example, the classification methods (boosted regression trees and random forests) tested by Elith et al. [-@elith2009] were more prone than Maxent to capture idiosyncratic patterns specific to the sample, despite applying variance reduction measures similar to Maxent's lasso regularization [@elith2009, Supplemental Information].
 Put another way, a maximally noncommittal model is likely to generalize well beyond its training data. 
-This fact may not be captured in measures of predictive performance, which are typically estimated by use of data that are not fully independent of the training data [@halvorsen2012] due to spatial and temporal autocorrelation in geographic distributions [@araujo2005].
+This fact may not be captured in measures of predictive performance, which are typically estimated with data that are not fully independent of the training data [@halvorsen2012] due to spatial and temporal autocorrelation in geographic distributions [@araujo2005].
 Presence-absence evaluation data that are collected independently of the training data may nonetheless give the best indication of a model's generalizability [e.g. @edvardsen2011; @searcy2014; @halvorsen2016; @pinto2016; @west2016].
 
 While some fitting algorithms assume a distinct form of the occurrence-environment relationship, such as the rectilinear environmental space dictated by the classic BIOCLIM algorithm [@guisan2000], maximum entropy fitting is exclusively responsive to the data. 
@@ -253,7 +253,7 @@ The hierarchical selection procedure can also be used to manipulate model comple
 
 A number of additional features in MIAmaxent improve control over the forward stepwise selection process, or aid interpretation of its outcome.
 First, it is possible to start EV selection from a minimal model that includes one or more EVs, by specifying a model `formula`. 
-A priori inclusion of EVs may be desirable when these are known to affect the distribution [-@gelman2006, first general principle for building regression models for prediction]. 
+A priori inclusion of EVs may be desirable when these are known to affect the distribution [@gelman2006, first general principle for building regression models for prediction]. 
 It is also useful for testing hypotheses.
 Second, first-order interactions between pairs of EVs with individually significant main effects may be tested.
 Interactions are not considered by default because their ecological justification is usually more tenuous than that of main effects [@merow2014].
@@ -307,7 +307,7 @@ To underline the importance of distinguishing between AUC calculated using prese
 
 # Examples
 
-Both examples below are easily reproducible in R (version 3.5.2), using the R markdown file used to create this paper, which is archived in Dryad.
+Both examples below are easily reproducible in R (version 3.5.2), using the R markdown file used to create this paper, which is available on GitHub (<https://github.com/julienvollering/MIAmaxent-paper>).
 
 ## MIAmaxent workflow
 
