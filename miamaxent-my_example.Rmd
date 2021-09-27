@@ -1,0 +1,299 @@
+---
+title: "Untitled"
+author: "AMAO"
+date: "9/26/2021"
+output: html_document
+---
+
+```{r}
+#?"MIAmaxent" 
+
+  library(MIAmaxent)
+```
+
+
+Before beginning the modeling exercise, it may be useful to see what some of the data look like in their geographical representation. We can use the raster package to plot the 1059 recorded presences on top of one of the environmental variable rasters:
+```{r}
+library(raster)
+#> Loading required package: sp
+EV1 <- raster(list.files(system.file("extdata", "EV_continuous", 
+                                     package="MIAmaxent"), full.names=TRUE)[1])
+PO <- read.csv(system.file("extdata", "occurrence_PO.csv", package="MIAmaxent"))
+plot(EV1, legend=FALSE)
+points(PO$POINT_X, PO$POINT_Y, pch = 20, cex = 0.5, col = 'blue')
+```
+readData()
+The starting point for modeling using MIAmaxent is a simple data object that contains occurrence data for the modeled target, and some number of explanatory variables (EVs). This data object must be formatted as a data frame, with the binary response variable (RV) representing occurrence in the first column, and corresponding EV values in subsequent columns. When the occurrence data consist of presence and absence records, these should be coded as “1” and “0” respectively. When the occurrence data consist of presence records only, presence locations are contrasted against locations with unknown occurrence, and the RV should be coded as “1” or “NA”. EVs may be continuous (numeric class) or categorical (factor class), as denoted in the data object.
+
+The readData() function transforms data in CSV and ASCII raster file formats into a single data frame which serves as the starting point for modeling.
+
+Users of the highly popular maxent.jar program for maximum entropy modeling are accustomed to data in a different format. Specifically, occurrence data is often in CSV file format, with presences records followed by coordinates, and explanatory data in ASCII raster file format. The readData() function makes it easy to read these data into the data object that is used in MIAmaxent. This function extracts values of the EVs at locations specified in the CSV file and properly formats these into the starting point for modeling. If the CSV file contains presence records only, then readData() also selects a random set of uninformed background locations for the data object. Alternatively, the user can specify a custom set of background locations by giving these in the CSV file.
+
+We begin by creating our data object from file. Note that continuous and categorical environmental variables must be placed in separate directories:
+```{r}
+library(MIAmaxent)
+grasslandPO <- readData(
+  occurrence=system.file("extdata", "occurrence_PO.csv", package="MIAmaxent"), 
+  contEV=system.file("extdata", "EV_continuous", package="MIAmaxent"),
+  catEV=system.file("extdata", "EV_categorical", package="MIAmaxent"),
+  maxbkg=20000)
+```
+
+
+
+In this case, the number of uninformed background locations to be randomly selected (maxbkg=20000) was larger than the total number of raster cells in the study area, so all cells are included in the data object.
+
+Most functions in MIAmaxent return console output. Therefore, it’s handy to assign function output to an object, so that you can manipulate that object further. If you forget, you can use ?.Last.value().
+
+If we look at the resulting data object we see the response variable (with 1059 presence and 16420 background locations) along with 8 continuous and 5 categorical EVs:
+```{r}
+str(grasslandPO)
+
+sum(grasslandPO$RV == 1, na.rm = TRUE)
+
+sum(is.na(grasslandPO$RV))
+
+```
+### Examining patterns in occurrence
+By its simplest definition, a distribution model examines the relationship between the modeled target and its environment. In this way, distribution modeling follows the long tradition of gradient analysis in vegetation ecology (Halvorsen, 2012). Therefore, before building an actual model, we should have some idea about what influence the environmental variables have on the occurrence of the target.
+
+plotFOP()
+We can use the plotFOP function to create a so-called Frequency of Observed Presence (FOP) plot. An FOP plot shows how commonly the target occurs across the range of the EV, and makes it possible to recognize patterns in frequency of occurrence. In theory, the relationship between a continuous EV and modeled target is expected to be unimodal, if the observed range of the EV is sufficiently large. In practice, the pattern seen in the FOP plot depends not only on the range of the EV — which is affected by the extent of the study area — but also the scaling of the EV.
+
+Here we examine FOP plots for 2 of the continuous EVs:
+
+```{r}
+teraspifFOP <- plotFOP(grasslandPO, "teraspif")
+terslpdgFOP <- plotFOP(grasslandPO, "terslpdg")
+```
+The points in these FOP plots show the observed proportion of points in a given interval of the EV which contain presences. The red line is a local regression smoother which aims to summarize the pattern in the empirical FOP values. The grey distribution in the background is an approximation of the data density across the range of the EV.
+
+Notice the difference in the scales of the FOP axes. EVs showing a larger interval on the FOP axis typically carry more explanatory power.
+
+We can change the number of the number of intervals used to calculate FOP, or the neighborhood of the smoother, and we can access the plotted data directly:
+
+terslpdgFOP <- plotFOP(grasslandPO, "terslpdg", span = 0.75, intervals = 20)
+
+terslpdgFOP
+#> $EVoptimum
+#> [1] 6.382247
+#> 
+#> $FOPdata
+#>                 int    n     intEV      intRV       loess
+#> 1  (-0.00951,0.476] 2506 0.2601985 0.06304868  0.06692123
+#> 2     (0.476,0.951] 3730 0.7188061 0.06729223  0.06253300
+#> 3      (0.951,1.43] 3447 1.1799195 0.05860168  0.05922944
+#> 4        (1.43,1.9] 2560 1.6513057 0.05507812  0.05698450
+#> 5        (1.9,2.38] 1834 2.1238806 0.05507088  0.05588399
+#> 6       (2.38,2.85] 1239 2.5967183 0.05004036  0.05601716
+#> 7       (2.85,3.33]  830 3.0659710 0.06626506  0.05736699
+#> 8        (3.33,3.8]  480 3.5487974 0.06666667  0.05992171
+#> 9        (3.8,4.28]  318 4.0297763 0.05974843  0.06412131
+#> 10      (4.28,4.76]  202 4.4976457 0.05445545  0.06853793
+#> 11      (4.76,5.23]  131 4.9892501 0.08396947  0.07204624
+#> 12      (5.23,5.71]   72 5.4752495 0.06944444  0.07506689
+#> 13      (5.71,6.18]   44 5.9547193 0.11363636  0.07805324
+#> 14      (6.18,6.66]   44 6.3822473 0.04545455  0.07853477
+#> 15      (6.66,7.13]   21 6.8873543 0.19047619  0.07539665
+#> 16      (7.13,7.61]   12 7.3856734 0.00000000  0.06830319
+#> 17      (7.61,8.08]    5 7.7893479 0.00000000  0.05917056
+#> 18      (8.08,8.56]    2 8.1287899 0.00000000  0.05042162
+#> 19      (8.56,9.04]    1 9.0068598 0.00000000  0.01422974
+#> 20      (9.04,9.52]    1 9.5107498 0.00000000 -0.01200278
+Based on this FOP plot, the occurrence of semi-natural grasslands seems to be unimodally related to ‘terslopdg’ (terrain slope) with a maximum at around 6.
+
+Now we examine FOP plots for one of the categorical EVs:
+
+geobergFOP <- plotFOP(grasslandPO, 10)
+
+We see that geoberg type 4 has the highest rate of observed presence, followed by type 2, and then types 3 and 28. If we look more closely however, we notice also that geoberg type 4 is sampled very rarely (see grey bars), with only 6 locations falling into that category:
+
+geobergFOP
+#> $EVoptimum
+#> [1] 4
+#> Levels: 0 2 3 4 5 21 22 26 27 28 29 35 40 62 82 85
+#> 
+#> $FOPdata
+#>    level    n    levelRV
+#> 1      0    5 0.00000000
+#> 2      2   20 0.45000000
+#> 3      3   74 0.28378378
+#> 4      4    6 0.50000000
+#> 5      5  456 0.10526316
+#> 6     21 3448 0.05974478
+#> 7     22   46 0.06521739
+#> 8     26   14 0.00000000
+#> 9     27   21 0.09523810
+#> 10    28   58 0.27586207
+#> 11    29    6 0.00000000
+#> 12    35  369 0.11382114
+#> 13    40    1 0.00000000
+#> 14    62 8183 0.05230356
+#> 15    82 4445 0.05939258
+#> 16    85  327 0.05198777
+If geoberg type 4 had shown a high FOP value and a large number of observations, the uncertainty associated with its FOP value would be lower and its likelihood of being selected in the model would be increased.
+
+It’s useful to examine FOP plots for all candidate explanatory variables (EVs) before building a model.
+
+Looking at FOP plots should help the modeler decide which EVs are likely to have greatest explanatory power, and gives an idea of the strength and shape of the relationships between the EVs and RV.
+
+```{r}
+terslpdgFOP <- plotFOP(grasslandPO, "terslpdg", span = 0.75, intervals = 20)
+terslpdgFOP
+geobergFOP <- plotFOP(grasslandPO, 10)
+geobergFOP
+```
+## Transforming explanatory variables (EVs)
+To fit the many different kinds of relationships between explanatory and response variables, we need to transform the EVs. This means that we create new “derived” variables (DVs) from the original EVs. Another way of thinking about this is to put it in terms of rescaling; we adjust the scale of the EV in many different ways in order to check which scaling is most ecologically relevant to the occurrence of the modeled target.
+
+### deriveVars()
+The deriveVars() function produces DVs from EVs by 7 different transformation types: linear, monotonous, deviation, forward hinge, reverse hinge, threshold, and binary (Halvorsen et al., 2015). The first 6 of these are relevant for continuous variables and the binary transformation is relevant only for categorical variables. Different types of transformations can be turned on or off to balance model complexity with model fit.
+
+For the spline-type transformations (forward hinge, reverse hinge, threshold) an endless number of different transformations are possible, so by default the function produces 20 of each, and then chooses those which explain the most variation in the RV. This means that 20 models are built and evaluated for each combination of EV and spline transformation, so running deriveVars() with these transformation types turned on can take a bit of time — depending on the size of the data set.
+
+Here we produce all types of DVs from our EVs:
+
+
+                           
+```{r}
+grasslandDVs <- deriveVars(grasslandPO, 
+                           transformtype = c("L","M","D","HF","HR","T","B"))
+```
+Turn write on and (optionally) specify a directory to save the transformation functions produced by deriveVars to file.
+
+The output of deriveVars() is a list consisting of 2 parts:
+
+data frames of DVs for each EV (named “dvdata”)
+the transformation functions used to produce each DV (named “transformations”).
+Both list elements also contain the RV vector.
+
+In our grasslands analysis, the contents of the list items look like this:
+
+summary(grasslandDVs$dvdata)
+#>            Length Class      Mode   
+#> RV         17479  -none-     numeric
+#> pca1          10  data.frame list   
+#> prbygall       5  data.frame list   
+#> prtilany       7  data.frame list   
+#> teraspif       8  data.frame list   
+#> terdem         8  data.frame list   
+#> terslpdg       5  data.frame list   
+#> tersolrade     5  data.frame list   
+#> tertpi09       8  data.frame list   
+#> geoberg       16  data.frame list   
+#> geolmja1      15  data.frame list   
+#> lcucor1       21  data.frame list   
+#> lcutilt4       2  data.frame list   
+#> terslpps15     6  data.frame list
+head(summary(grasslandDVs$transformations))
+#>                 Length Class  Mode    
+#> RV              17479  -none- numeric 
+#> pca1_L_transf       1  -none- function
+#> pca1_M_transf       1  -none- function
+#> pca1_D05_transf     1  -none- function
+#> pca1_D1_transf      1  -none- function
+#> pca1_D2_transf      1  -none- function
+length(grasslandDVs$transformations)
+#> [1] 117
+Note that the names of DVs indicate the type of transformation was used to create them. For example, “terslpdg_D2” is a deviation-type transformation of terslpdg, where the slope of the deviation is controlled by a parameter value of 2. Meanwhile, “terslpdg_HR4” is a reverse hinge transformation, with the knot in the 4th position.
+
+Underscores (’_‘) are used to denote DVs, and colons (’:’) are used to denote interaction terms, so EV names must not contain these characters. EV names should also be unique.
+
+To illustrate, look at how a given DV relates to the original, untransformed EV from which it was derived. Here we examine “terslpdg_D2” and “terslpdg_M”:
+
+plot(grasslandPO$terslpdg, grasslandDVs$dvdata$terslpdg$terslpdg_D2, pch=20, 
+     ylab="terslpdg_D2")
+plot(grasslandPO$terslpdg, grasslandDVs$dvdata$terslpdg$terslpdg_M, pch=20,
+     ylab="terslpdg_M")
+
+
+“terslpdg_D2” is the squared deviation (hence D2) from the estimated optimum in terslpdg (around 6). “terslpdg_M” is a monotone (hence M) transformation of terslpdg — specifically a zero-skew transformation.
+
+Selecting variables
+With DVs ready, we are ready to begin the process of choosing which variables to include in the model. This is arguably the most critical step in the whole modeling process. Following the principle of parsimony, the aim in selecting variables is to explain as much variation in the RV as efficiently as possible. The greater the number of EVs or DVs included in the model, the more variation in the RV we can explain, but at the cost of model complexity. In the MIAmaxent package, the benefit of additional variation explained is weighed against the cost in model complexity using an inference test (Chi-squared or F). Variables are added to the model one by one in a process termed forward selection, and each new model is compared to its predecessor. Another term for this process is “nested model comparison.”
+
+Rather than selecting from the full pool of DVs one by one, MIAmaxent performs variable selection in two parts:
+
+First, a set of DVs is selected separately for each individual EV. This is done using the selectDVforEV() function.
+Second, the EVs themselves — each represented by a parsimonious set of DVs — are selected. This is done using the selectEV() function.
+Variable selection occurs hierarchically: first DVs for each EV, then EVs for the full model.
+
+##selectDVforEV()
+The selectDVforEV() function performs forward selection of individual DVs for each EV. In other words, the function takes each EV one by one, and narrows the group of DVs produced from that EV to a set which explains variation in the RVs most efficiently.
+
+The alpha argument to selectDVforEV() is used in the inference test during forward selection, setting the threshold for how much variation a DV must explain to be retained. A lower alpha results in a more conservative test, i.e. DVs must explain more variation to be selected.
+
+Here we use selectDVforEV() on the grassland data set. Note the “$dvdata” following grasslandsDV, which identifies the list of DVs we made using deriveVars() (see ?deriveVars() Value).
+```{r}
+grasslandDVselect <- selectDVforEV(grasslandDVs$dvdata, alpha = 0.001, quiet = TRUE)
+grasslandEVselect <- selectEV(grasslandDVselect$dvdata, alpha = 0.001, 
+                              interaction = TRUE)
+```
+
+
+
+
+```{r}
+summary(grasslandDVselect$dvdata)
+
+length(grasslandDVselect$dvdata[-1])
+
+summary(grasslandEVselect$dvdata)
+
+length(grasslandEVselect$dvdata[-1])
+```
+
+```{r}
+grasslandEVselect$selectedmodel$formula
+```
+
+```{r}
+grasslandEVselect$selection[!duplicated(grasslandEVselect$selection$round), ]
+```
+
+```{r}
+plot(grasslandEVselect$selection$round, grasslandEVselect$selection$Dsq, 
+     xlab="round", ylab="Dsq")
+```
+
+```{r}
+grasslandmodel <- chooseModel(grasslandDVselect$dvdata, 
+                              formula("~ prbygall + geoberg + lcucor1 + 
+                                      tertpi09 + geolmja1"))
+```
+
+
+
+
+```{r}
+calculateFTVA(grasslandEVselect, formula("~ prbygall + geoberg + lcucor1 + 
+                                      tertpi09 + geolmja1"))
+```
+
+```{r}
+
+```
+
+For “maxent”-type models, the projectModel returns model predictions in probability ratio output (PRO) format for each location represented in data. PRO format gives relative probability of presence, and PRO = 1 is a reference value that represents the probability of presence in an “average” location in the training data.
+
+
+
+```{r}
+EVfiles <- c(list.files(system.file("extdata", "EV_continuous", package="MIAmaxent"), 
+             full.names=TRUE),
+             list.files(system.file("extdata", "EV_categorical", package="MIAmaxent"), 
+             full.names=TRUE))
+EVstack <- raster::stack(EVfiles)
+names(EVstack) <- gsub(".asc", "", basename(EVfiles))
+grasslandPreds <- projectModel(model = grasslandmodel,
+                               transformations = grasslandDVs$transformations,
+                               data = EVstack)
+```
+```{r}
+plot(log2(grasslandPreds$output+1))
+```
+
+```{r}
+grasslandPreds
+```
+
